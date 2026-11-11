@@ -1,0 +1,35 @@
+# Runs on the deploy host. Put production values in ./.env there (never in git).
+# Required keys in .env: DJANGO_SECRET_KEY, POSTGRES_DB/USER/PASSWORD, POSTGRES_HOST=db,
+# REDIS_URL=redis://redis:6379/0, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_PRO, FRONTEND_URL.
+services:
+  db:
+    image: postgres:16
+    env_file: .env
+    volumes: [pgdata:/var/lib/postgresql/data]
+    restart: unless-stopped
+  redis:
+    image: redis:7
+    restart: unless-stopped
+  web:
+    image: ${IMAGE_REPO}:${IMAGE_TAG}
+    env_file: .env
+    ports: ["127.0.0.1:8000:8000"]   # put a TLS reverse proxy in front of this
+    volumes: [media:/app/media]
+    depends_on: [db, redis]
+    restart: unless-stopped
+  worker:
+    image: ${IMAGE_REPO}:${IMAGE_TAG}
+    env_file: .env
+    command: celery -A config worker -l info
+    volumes: [media:/app/media]
+    depends_on: [db, redis]
+    restart: unless-stopped
+  beat:
+    image: ${IMAGE_REPO}:${IMAGE_TAG}
+    env_file: .env
+    command: celery -A config beat -l info
+    depends_on: [redis]
+    restart: unless-stopped
+volumes:
+  pgdata: {}
+  media: {}
