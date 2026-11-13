@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import AuthForm from "./AuthForm";
+import Login from "./login";
 import KanbanBoard from "./KanbanBoard";
 
 export default function App() {
@@ -195,7 +195,7 @@ export default function App() {
 
   // Authentication screen
   if (!me) {
-    return <AuthForm onAuthed={() => loadMe()} />;
+    return <Login onAuthed={() => loadMe()} />
   }
 
   const pageTitle =
@@ -868,7 +868,7 @@ export default function App() {
 
             {/* No board selected */}
             {activePage === "board" && !boardId && (
-              <div className="flex min-h-[400px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
+              <div className="flex [min-h-400] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
                 <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 text-3xl text-indigo-600">
                   ▤
                 </div>
