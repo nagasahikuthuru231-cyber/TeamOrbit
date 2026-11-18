@@ -1,7 +1,7 @@
 from django.db import models
 from rest_framework import serializers
 
-from .models import (Attachment, AuditLog, Board, Comment, Invitation, Issue, Membership,
+from .models import (Attachment, AuditLog, Comment, Invitation, Issue, Membership,
                      Project, Sprint, WebhookEndpoint)
 from .validators import validate_attachment
 
@@ -20,18 +20,31 @@ class TenantSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class MemberSerializer(serializers.ModelSerializer):
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    email = serializers.EmailField(source="user.email", read_only=True)
+    name = serializers.CharField(source="user.first_name", read_only=True)
+
+    class Meta:
+        model = Membership
+        fields = ("user_id", "email", "name", "role")
+
+
 class ProjectSerializer(TenantSerializer):
     class Meta:
         model = Project
         fields = "__all__"
         read_only_fields = ("workspace", "created_at")
 
-
-class BoardSerializer(TenantSerializer):
-    class Meta:
-        model = Board
-        fields = "__all__"
-        read_only_fields = ("workspace", "created_at")
+    def validate_columns(self, value):
+        if not isinstance(value, list) or not value:
+            raise serializers.ValidationError("Provide at least one column.")
+        if len(value) > 10:
+            raise serializers.ValidationError("A project can have at most 10 columns.")
+        cleaned = [str(c).strip() for c in value]
+        if any(not c for c in cleaned) or len(set(cleaned)) != len(cleaned):
+            raise serializers.ValidationError("Column names must be unique and non-empty.")
+        return cleaned
 
 
 class SprintSerializer(TenantSerializer):
@@ -50,13 +63,18 @@ class IssueSerializer(TenantSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        board = attrs.get("board", getattr(self.instance, "board", None))
-        if board is not None:
-            if self.instance is None and "status" not in attrs:
-                attrs["status"] = board.columns[0]
-            status = attrs.get("status", getattr(self.instance, "status", None))
-            if status not in board.columns:
-                raise serializers.ValidationError({"status": f"'{status}' is not a column on this board."})
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        if self.instance is None and "status" not in attrs and project is not None:
+            attrs["status"] = project.columns[0]
+        status = attrs.get("status", getattr(self.instance, "status", None))
+        if project is not None and status not in project.columns:
+            raise serializers.ValidationError({"status": f"'{status}' is not a column on this project."})
+
+        assignee = attrs.get("assignee")
+        if assignee is not None:
+            workspace_id = self.context["request"].membership.workspace_id
+            if not Membership.objects.filter(workspace_id=workspace_id, user=assignee).exists():
+                raise serializers.ValidationError({"assignee": "This user is not a member of this workspace."})
         return attrs
 
 

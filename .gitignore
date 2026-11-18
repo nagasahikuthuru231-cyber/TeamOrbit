@@ -1,2 +1,14 @@
-# Frontend dependencies
+# Python
+__pycache__/
+*.pyc
+backend/media/
+.venv/
+venv/
+
+# Frontend
 frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Secrets and local env
+.env

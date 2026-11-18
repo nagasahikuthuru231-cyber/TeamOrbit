@@ -5,7 +5,7 @@ from . import accounts, billing, views
 
 router = DefaultRouter()
 router.register("projects", views.ProjectViewSet)
-router.register("boards", views.BoardViewSet)
+router.register("members", views.MemberViewSet)
 router.register("sprints", views.SprintViewSet)
 router.register("issues", views.IssueViewSet)
 router.register("comments", views.CommentViewSet)

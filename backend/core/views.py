@@ -9,11 +9,11 @@ from rest_framework.response import Response
 
 from .billing import enforce_member_limit, enforce_project_limit
 from .mixins import AuditMixin, TenantMixin
-from .models import (Attachment, AuditLog, Board, Comment, Invitation, Issue,
+from .models import (Attachment, AuditLog, Comment, Invitation, Issue, Membership,
                      Project, Sprint, WebhookEndpoint)
 from .permissions import IsAuthorOrAdmin
-from .serializers import (AttachmentSerializer, AuditLogSerializer, BoardSerializer,
-                          CommentSerializer, InvitationSerializer, IssueSerializer,
+from .serializers import (AttachmentSerializer, AuditLogSerializer, CommentSerializer,
+                          InvitationSerializer, IssueSerializer, MemberSerializer,
                           ProjectSerializer, SprintSerializer, WebhookEndpointSerializer)
 from .services import hash_token, place_issue
 from .tasks import notify_assignee, send_invite_email
@@ -29,10 +29,10 @@ class ProjectViewSet(TenantMixin, AuditMixin, viewsets.ModelViewSet):
         super().perform_create(serializer)
 
 
-class BoardViewSet(TenantMixin, AuditMixin, viewsets.ModelViewSet):
-    queryset = Board.objects.all()
-    serializer_class = BoardSerializer
-    write_min_role = "admin"
+class MemberViewSet(TenantMixin, viewsets.ReadOnlyModelViewSet):
+    """Workspace members, used for the assignee picker."""
+    queryset = Membership.objects.select_related("user")
+    serializer_class = MemberSerializer
 
 
 class SprintViewSet(TenantMixin, AuditMixin, viewsets.ModelViewSet):
@@ -50,14 +50,13 @@ class IssueViewSet(TenantMixin, AuditMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        board = self.request.query_params.get("board")
-        return qs.filter(board_id=board) if board else qs
+        project = self.request.query_params.get("project")
+        return qs.filter(project_id=project) if project else qs
 
     def perform_create(self, serializer):
         super().perform_create(serializer)
         issue = serializer.instance
-        count = (Issue.objects.filter(project_id=issue.project_id, board_id=issue.board_id,
-                                      status=issue.status)
+        count = (Issue.objects.filter(project_id=issue.project_id, status=issue.status)
                  .exclude(pk=issue.pk).count())
         place_issue(issue, issue.status, count)  # new issues go to the bottom of their column
 
@@ -77,8 +76,8 @@ class IssueViewSet(TenantMixin, AuditMixin, viewsets.ModelViewSet):
             index = int(request.data.get("index", 0))
         except (TypeError, ValueError):
             return Response({"detail": "index must be an integer."}, status=400)
-        if issue.board and status not in issue.board.columns:
-            return Response({"detail": "Invalid status for this board."}, status=400)
+        if status not in issue.project.columns:
+            return Response({"detail": "Invalid status for this project."}, status=400)
         place_issue(issue, status, index)
         self._audit("move", issue, {"status": status, "index": index})
         return Response(IssueSerializer(issue).data)

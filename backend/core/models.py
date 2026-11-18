@@ -46,18 +46,14 @@ class TenantModel(models.Model):
 
 
 class Project(TenantModel):
+    """A project is its own Kanban board: `columns` is its workflow."""
     name = models.CharField(max_length=120)
     key = models.CharField(max_length=10)
     description = models.TextField(blank=True)
+    columns = models.JSONField(default=default_columns)  # ordered statuses
 
     class Meta:
         unique_together = ("workspace", "key")
-
-
-class Board(TenantModel):
-    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="boards")
-    name = models.CharField(max_length=120)
-    columns = models.JSONField(default=default_columns)  # custom workflow: ordered statuses
 
 
 class Sprint(TenantModel):
@@ -75,7 +71,6 @@ class Sprint(TenantModel):
 
 class Issue(TenantModel):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="issues")
-    board = models.ForeignKey(Board, null=True, blank=True, on_delete=models.SET_NULL, related_name="issues")
     sprint = models.ForeignKey(Sprint, null=True, blank=True, on_delete=models.SET_NULL, related_name="issues")
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)

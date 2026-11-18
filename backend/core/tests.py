@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from .models import Board, Comment, Invitation, Issue, Membership, Project, Workspace
+from .models import Comment, Invitation, Issue, Membership, Project, Workspace
 from .services import hash_token
 
 User = get_user_model()
@@ -137,19 +137,133 @@ class AttachmentValidationTests(Base):
 
 class IssueMoveTests(Base):
     def test_move_places_issue_at_index_and_renumbers(self):
-        board = Board.objects.create(workspace=self.w1, project=self.project, name="B")
-        a, b, c = [Issue.objects.create(workspace=self.w1, project=self.project, board=board,
+        a, b, c = [Issue.objects.create(workspace=self.w1, project=self.project,
                                         title=t, status="To Do", position=i)
                    for i, t in enumerate("abc", 1)]
         r = self.client.post(f"/api/issues/{c.id}/move/", {"status": "To Do", "index": 0},
                              format="json", HTTP_X_WORKSPACE="one")
         self.assertEqual(r.status_code, 200)
-        order = [i.title for i in Issue.objects.filter(board=board).order_by("position")]
+        order = [i.title for i in Issue.objects.filter(project=self.project).order_by("position")]
         self.assertEqual(order, ["c", "a", "b"])
 
     def test_move_rejects_unknown_status(self):
-        board = Board.objects.create(workspace=self.w1, project=self.project, name="B")
-        issue = Issue.objects.create(workspace=self.w1, project=self.project, board=board, title="x")
+        issue = Issue.objects.create(workspace=self.w1, project=self.project, title="x")
         r = self.client.post(f"/api/issues/{issue.id}/move/", {"status": "Nope", "index": 0},
                              format="json", HTTP_X_WORKSPACE="one")
         self.assertEqual(r.status_code, 400)
+
+
+class AssigneeTests(Base):
+    def setUp(self):
+        super().setUp()
+        Membership.objects.filter(user=self.user).update(role="admin")
+        self.issue = Issue.objects.create(workspace=self.w1, project=self.project, title="Fix login")
+
+    def test_new_issue_is_unassigned(self):
+        self.assertIsNone(self.issue.assignee)
+
+    def test_assign_then_unassign(self):
+        url = f"/api/issues/{self.issue.id}/"
+        r = self.client.patch(url, {"assignee": self.user.id}, format="json", HTTP_X_WORKSPACE="one")
+        self.assertEqual(r.status_code, 200)
+        self.issue.refresh_from_db()
+        self.assertEqual(self.issue.assignee, self.user)
+
+        r = self.client.patch(url, {"assignee": None}, format="json", HTTP_X_WORKSPACE="one")
+        self.assertEqual(r.status_code, 200)
+        self.issue.refresh_from_db()
+        self.assertIsNone(self.issue.assignee)
+
+    def test_cannot_assign_user_outside_workspace(self):
+        outsider = User.objects.create_user("eve", email="eve@x.com", password="pw-123456-long")
+        r = self.client.patch(f"/api/issues/{self.issue.id}/", {"assignee": outsider.id},
+                              format="json", HTTP_X_WORKSPACE="one")
+        self.assertEqual(r.status_code, 400)
+        self.issue.refresh_from_db()
+        self.assertIsNone(self.issue.assignee)
+
+    def test_members_endpoint_lists_only_this_workspace(self):
+        self.make_user("bob")
+        r = self.client.get("/api/members/", HTTP_X_WORKSPACE="one")
+        self.assertEqual(r.status_code, 200)
+        emails = sorted(m["email"] for m in r.json()["results"])
+        self.assertEqual(emails, ["alice@x.com", "bob@x.com"])
+
+    def test_viewer_can_read_members_but_not_change_issue_assignee_via_other_workspace(self):
+        r = self.client.get("/api/members/", HTTP_X_WORKSPACE="two")
+        self.assertEqual(r.status_code, 403)
+
+
+class ProjectColumnsAndDeleteTests(Base):
+    def setUp(self):
+        super().setUp()
+        Membership.objects.filter(user=self.user).update(role="admin")
+
+    def test_project_columns_are_its_workflow(self):
+        r = self.client.post("/api/projects/", {"name": "Web", "key": "WEB",
+                                                "columns": ["Backlog", "Doing", "Shipped"]},
+                             format="json", HTTP_X_WORKSPACE="one")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()["columns"], ["Backlog", "Doing", "Shipped"])
+
+    def test_empty_or_duplicate_columns_are_rejected(self):
+        for bad in ([], ["A", "A"], [""]):
+            r = self.client.patch(f"/api/projects/{self.project.id}/", {"columns": bad},
+                                  format="json", HTTP_X_WORKSPACE="one")
+            self.assertEqual(r.status_code, 400, bad)
+
+    def test_admin_can_delete_project_and_its_issues(self):
+        Issue.objects.create(workspace=self.w1, project=self.project, title="t")
+        r = self.client.delete(f"/api/projects/{self.project.id}/", HTTP_X_WORKSPACE="one")
+        self.assertEqual(r.status_code, 204)
+        self.assertFalse(Project.objects.filter(pk=self.project.id).exists())
+        self.assertFalse(Issue.objects.filter(title="t").exists())
+
+    def test_member_cannot_delete_project(self):
+        Membership.objects.filter(user=self.user).update(role="member")
+        r = self.client.delete(f"/api/projects/{self.project.id}/", HTTP_X_WORKSPACE="one")
+        self.assertEqual(r.status_code, 403)
+        self.assertTrue(Project.objects.filter(pk=self.project.id).exists())
+
+
+class StripeBillingTests(Base):
+    """Plan changes come only from verified Stripe webhooks."""
+
+    def setUp(self):
+        super().setUp()
+        self.w1.stripe_customer_id = "cus_test_1"
+        self.w1.save(update_fields=["stripe_customer_id"])
+
+    def post_event(self, event=None, error=None):
+        from unittest import mock
+        patch = mock.patch("core.billing.stripe.Webhook.construct_event",
+                           return_value=event, side_effect=error)
+        with patch:
+            return APIClient().post("/billing/webhook/", data=b"{}", content_type="application/json",
+                                    HTTP_STRIPE_SIGNATURE="t=1,v1=sig")
+
+    def test_active_subscription_upgrades_plan(self):
+        event = {"type": "customer.subscription.updated",
+                 "data": {"object": {"customer": "cus_test_1", "status": "active"}}}
+        self.assertEqual(self.post_event(event).status_code, 200)
+        self.w1.refresh_from_db()
+        self.assertEqual(self.w1.plan, "pro")
+
+    def test_deleted_subscription_downgrades_plan(self):
+        self.w1.plan = "pro"
+        self.w1.save(update_fields=["plan"])
+        event = {"type": "customer.subscription.deleted",
+                 "data": {"object": {"customer": "cus_test_1", "status": "canceled"}}}
+        self.assertEqual(self.post_event(event).status_code, 200)
+        self.w1.refresh_from_db()
+        self.assertEqual(self.w1.plan, "free")
+
+    def test_bad_signature_is_rejected_and_changes_nothing(self):
+        r = self.post_event(error=ValueError("bad signature"))
+        self.assertEqual(r.status_code, 400)
+        self.w1.refresh_from_db()
+        self.assertEqual(self.w1.plan, "free")
+
+    def test_only_owner_can_start_checkout(self):
+        r = self.client.post("/api/billing/checkout/", HTTP_X_WORKSPACE="one")
+        self.assertEqual(r.status_code, 403)  # alice is a member, not an owner

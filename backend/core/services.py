@@ -18,7 +18,7 @@ def place_issue(issue, status, index):
     """
     siblings = list(
         Issue.objects.select_for_update()
-        .filter(project_id=issue.project_id, board_id=issue.board_id, status=status)
+        .filter(project_id=issue.project_id, status=status)
         .exclude(pk=issue.pk)
         .order_by("position", "id")
     )
