@@ -19,11 +19,11 @@ export default function Login({ onAuthed }) {
             <div className="relative z-10">
               <div className="mb-12 flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 text-xl font-bold">
-                  C
+                  T
                 </div>
 
                 <span className="text-2xl font-bold">
-                  CollabSpace
+                  TeamOrbit
                 </span>
               </div>
 
@@ -56,11 +56,11 @@ export default function Login({ onAuthed }) {
             {/* Mobile and Tablet Branding */}
             <div className="mb-8 flex items-center justify-center gap-2 lg:hidden">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-lg font-bold text-white">
-                C
+                T
               </div>
 
               <span className="text-xl font-bold text-slate-800">
-                CollabSpace
+                TeamOrbit
               </span>
             </div>
 
@@ -68,7 +68,7 @@ export default function Login({ onAuthed }) {
 
               <div className="mb-8">
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-indigo-600 sm:text-sm">
-                  Welcome to CollabSpace
+                  Welcome to TeamOrbit
                 </p>
 
                 <h2 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl lg:text-2xl xl:text-3xl">
@@ -84,7 +84,7 @@ export default function Login({ onAuthed }) {
 
               <div className="mt-8 border-t border-slate-100 pt-6">
                 <p className="text-center text-xs leading-5 text-slate-400">
-                  By continuing, you agree to use CollabSpace responsibly.
+                  By continuing, you agree to use TeamOrbit responsibly.
                 </p>
               </div>
 
