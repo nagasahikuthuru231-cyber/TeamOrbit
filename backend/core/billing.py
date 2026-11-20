@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from .models import Invitation, Membership, Project, Workspace
 
 PLAN_LIMITS = {
-    "free": {"projects": 2, "members": 3},
+    "free": {"projects": 5, "members": 10},
     "pro": {"projects": 100, "members": 50},
 }
 
