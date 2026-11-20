@@ -16,7 +16,7 @@ from .serializers import (AttachmentSerializer, AuditLogSerializer, CommentSeria
                           InvitationSerializer, IssueSerializer, MemberSerializer,
                           ProjectSerializer, SprintSerializer, WebhookEndpointSerializer)
 from .services import hash_token, place_issue
-from .tasks import notify_assignee, send_invite_email
+from .tasks import notify_assignee
 
 
 class ProjectViewSet(TenantMixin, AuditMixin, viewsets.ModelViewSet):
@@ -126,7 +126,8 @@ class InvitationViewSet(TenantMixin, mixins.ListModelMixin, mixins.CreateModelMi
         AuditLog.objects.create(workspace=workspace, actor=self.request.user, action="create",
                                 entity="Invitation", entity_id=invite.pk,
                                 changes={"email": invite.email, "role": invite.role})
-        send_invite_email.delay(invite.id, token)
+        # No email is sent. The pending invitation is the grant: the person joins
+        # automatically the next time they sign up, log in, or load their account.
 
 
 class WebhookViewSet(TenantMixin, AuditMixin, viewsets.ModelViewSet):

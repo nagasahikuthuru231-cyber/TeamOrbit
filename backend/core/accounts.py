@@ -9,14 +9,38 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .billing import enforce_member_limit
+from .billing import PLAN_LIMITS, enforce_member_limit
 from .models import Invitation, Membership, Workspace
 from .services import hash_token
 
 
 def _token_response(user, code=200):
+    claim_pending_invitations(user)
     token, _ = Token.objects.get_or_create(user=user)
     return Response({"token": token.key}, status=code)
+
+
+def claim_pending_invitations(user):
+    """Join `user` to every workspace that invited their email and has not been claimed yet.
+
+    Invitations are grants by email address, so no email is sent. A workspace that is
+    already at its member limit keeps the invitation pending instead of blocking login.
+    """
+    email = (user.email or "").strip().lower()
+    if not email:
+        return
+    now = timezone.now()
+    pending = Invitation.objects.filter(email=email, accepted_at__isnull=True, expires_at__gt=now)
+    for invite in pending.select_related("workspace"):
+        with transaction.atomic():
+            workspace = Workspace.objects.select_for_update().get(pk=invite.workspace_id)
+            if not Membership.objects.filter(workspace=workspace, user=user).exists():
+                members = Membership.objects.filter(workspace=workspace).count()
+                if members >= PLAN_LIMITS[workspace.plan]["members"]:
+                    continue
+                Membership.objects.create(workspace=workspace, user=user, role=invite.role)
+            invite.accepted_at = now
+            invite.save(update_fields=["accepted_at"])
 
 
 @api_view(["POST"])
@@ -54,6 +78,7 @@ def login(request):
 @permission_classes([IsAuthenticated])
 def me(request):
     user = request.user
+    claim_pending_invitations(user)
     workspaces = [
         {"slug": m.workspace.slug, "name": m.workspace.name, "role": m.role, "plan": m.workspace.plan}
         for m in user.memberships.select_related("workspace")

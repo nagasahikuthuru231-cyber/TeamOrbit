@@ -43,19 +43,6 @@ def notify_assignee(issue_id):
 
 
 @shared_task
-def send_invite_email(invitation_id, token):
-    invite = Invitation.objects.select_related("workspace").get(pk=invitation_id)
-    link = f"{settings.FRONTEND_URL}/?invite={token}"
-    send_mail(
-        f"You're invited to {invite.workspace.name}",
-        f"You've been invited to join {invite.workspace.name} as {invite.role}.\n\n"
-        f"Accept: {link}\n\nThis link expires on {invite.expires_at:%Y-%m-%d}.",
-        None,
-        [invite.email],
-    )
-
-
-@shared_task
 def generate_weekly_reports():
     for sprint in Sprint.objects.filter(state=Sprint.State.ACTIVE):
         counts = dict(Counter(sprint.issues.values_list("status", flat=True)))

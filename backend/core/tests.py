@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from .models import Comment, Invitation, Issue, Membership, Project, Workspace
@@ -72,10 +73,10 @@ class AuthTests(Base):
 
 class InvitationTests(Base):
     def test_invite_blocked_at_plan_member_limit(self):
-        # free plan allows 3 members; alice is admin plus two more = 3
+        # free plan allows 10 members (see PLAN_LIMITS); fill the workspace to that limit
         Membership.objects.filter(user=self.user).update(role="admin")
-        self.make_user("bob")
-        self.make_user("carol")
+        for i in range(9):
+            self.make_user(f"member{i}")
         r = self.client.post("/api/invitations/", {"email": "dan@x.com", "role": "member"},
                              format="json", HTTP_X_WORKSPACE="one")
         self.assertEqual(r.status_code, 402)
@@ -267,3 +268,66 @@ class StripeBillingTests(Base):
     def test_only_owner_can_start_checkout(self):
         r = self.client.post("/api/billing/checkout/", HTTP_X_WORKSPACE="one")
         self.assertEqual(r.status_code, 403)  # alice is a member, not an owner
+
+
+class InviteByEmailTests(Base):
+    """Inviting by email grants access to that address. No email is sent."""
+
+    def setUp(self):
+        super().setUp()
+        Membership.objects.filter(user=self.user).update(role="admin")
+
+    def invite(self, email, workspace=None, days=7):
+        return Invitation.objects.create(
+            workspace=workspace or self.w1, email=email, role="member",
+            token_hash=hash_token("unused-" + email), expires_at=timezone.now() + timedelta(days=days))
+
+    def assert_joined(self, token, slug="one"):
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {token}")
+        me = c.get("/api/auth/me/").json()
+        self.assertEqual([w["slug"] for w in me["workspaces"]], [slug])
+        self.assertEqual(c.get("/api/projects/", HTTP_X_WORKSPACE=slug).status_code, 200)
+
+    def test_creating_an_invite_sends_no_email(self):
+        from django.core import mail
+        r = self.client.post("/api/invitations/", {"email": "new@x.com", "role": "member"},
+                             format="json", HTTP_X_WORKSPACE="one")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_signup_with_invited_email_joins_workspace(self):
+        self.client.post("/api/invitations/", {"email": "Bob@X.com", "role": "member"},
+                         format="json", HTTP_X_WORKSPACE="one")
+        r = APIClient().post("/api/auth/signup/", {"email": "bob@x.com", "password": "Str0ng-pass-B!"}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assert_joined(r.json()["token"])
+
+    def test_login_with_invited_email_joins_workspace(self):
+        self.invite("bob@x.com")
+        User.objects.create_user("bob@x.com", email="bob@x.com", password="pw-123456-long")
+        r = APIClient().post("/api/auth/login/", {"email": "bob@x.com", "password": "pw-123456-long"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assert_joined(r.json()["token"])
+
+    def test_existing_session_joins_on_next_me_call(self):
+        bob, bob_client = self.make_user("bob")
+        Membership.objects.filter(user=bob).delete()
+        self.invite("bob@x.com")
+        self.assert_joined(Token.objects.get_or_create(user=bob)[0].key)
+
+    def test_full_workspace_keeps_invite_pending_and_login_still_works(self):
+        for i in range(9):  # alice + 9 = the free plan limit of 10 members
+            self.make_user(f"member{i}")
+        self.invite("dan@x.com")
+        r = APIClient().post("/api/auth/signup/", {"email": "dan@x.com", "password": "Str0ng-pass-D!"}, format="json")
+        self.assertEqual(r.status_code, 201)
+        dan = User.objects.get(email="dan@x.com")
+        self.assertFalse(Membership.objects.filter(user=dan).exists())
+        self.assertTrue(Invitation.objects.get(email="dan@x.com").accepted_at is None)
+
+    def test_expired_invitation_does_not_join(self):
+        self.invite("erin@x.com", days=-1)
+        r = APIClient().post("/api/auth/signup/", {"email": "erin@x.com", "password": "Str0ng-pass-E!"}, format="json")
+        erin = User.objects.get(email="erin@x.com")
+        self.assertFalse(Membership.objects.filter(user=erin).exists())
