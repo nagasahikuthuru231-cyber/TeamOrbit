@@ -97,7 +97,7 @@ CELERY_BROKER_URL = os.environ.get(
     "REDIS_URL",
     "redis://localhost:6379/0"
 )
-CELERY_TASK_ALWAYS_EAGER = "test" in sys.argv
+CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "1") == "1"
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
